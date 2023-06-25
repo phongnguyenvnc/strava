@@ -1,164 +1,226 @@
-require('dotenv').config()
+require("dotenv").config();
 
-const express = require('express');
-const axios = require('axios');
-const cron = require('node-cron');
-const { cache } = require('./cache.js');
-const { telegram } = require('./telegram.js');
-const { getAccessToken } = require('./strava.js');
+const express = require("express");
+const axios = require("axios");
+const cron = require("node-cron");
+const { cache } = require("./src/cache");
+const { telegram } = require("./src/telegram.js");
+const { getAccessToken } = require("./src/strava.js");
 
 const app = express();
 
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log('Listening on port', PORT);
+  console.log("Listening on port", PORT);
 });
 
-let lastActivityString = null;
+let dafaultActivitiesString = [
+  "ATHL:Phuong T.-DIST:0-TIME:3075",
+  "ATHL:Quốc N.-DIST:15.02-TIME:5467",
+  "ATHL:Cong N.-DIST:0.5-TIME:1561",
+  'ATHL:Tống K.-DIST:5.88-TIME:1953',
+  "ATHL:Long D.-DIST:32.61-TIME:5285",
+];
+// let dafaultActivitiesString = [];
+cache.set("listActivityString", dafaultActivitiesString);
 let accessToken = null;
+let hasNew = 0;
 
 const getKilometerDistance = (distance) => {
-  return ` ${(distance / 1000).toFixed(1).replace(/\.0$/,'')}km`;
-}
+  return distance
+    ? ` ${(distance / 1000).toFixed(1).replace(/\.0$/, "")}km`
+    : "";
+};
 
 const getCommonActivityMessage = (time, distance) => {
-  return `với avg pace là ${new Date(time / distance * 1000000).toISOString().slice(14, 19)}/km`;
-}
+  if (time && distance) {
+    return `với avg pace là ${new Date((time / distance) * 1000000)
+      .toISOString()
+      .slice(14, 19)}/km`;
+  }
+  return "";
+};
 
 const getSwimActivityMessage = (time, distance) => {
-  return `với avg pace là ${(time / distance * 100).toFixed(0)}s/100m`
-}
+  if (time && distance) {
+    return `với avg pace là ${((time / distance) * 100).toFixed(0)}s/100m`;
+  }
+  return "";
+};
 
 const getRideActivityMessage = (time, distance) => {
-  return `với avg pace là ${(distance / 1000 / (1 / 60 * (time / 60))).toFixed(1).replace(/\.0$/,'')}km/h`
-}
+  if (time && distance) {
+    return `với avg pace là ${(distance / 1000 / ((1 / 60) * (time / 60)))
+      .toFixed(1)
+      .replace(/\.0$/, "")}km/h`;
+  }
+  return "";
+};
 
 const getDuration = (time) => {
-  return `${new Date(time * 1000).toISOString().slice(11, 19)}`;
-}
+  return time ? `${new Date(time * 1000).toISOString().slice(11, 19)}` : "";
+};
 
+const getActivityString = (athlete, dist, seconds) => {
+  return "ATHL:" + athlete + "-DIST:" + dist + "-TIME:" + seconds;
+};
 
-// cron.schedule('0,10,20,30,40,50 * * * *', function() {
-// });
+cron.schedule("0,10,27,30,40,50 * * * *", async () => {
+  const listActivityString = cache.get("listActivityString", null) || [];
+  console.log("Cached activity strings: ", listActivityString);
 
-setInterval(() => {
-  const lastActivityString =
-    cache.get('lastActivityString', null) || 'No activities';
-
-  console.log('Last Activity: ' + cache.get('lastActivityString', null));
-
-  getAccessToken()
+  await getAccessToken()
     .then((token) => {
       accessToken = token;
     })
     .catch((error) => {
+      console.log("Failed to get access token");
       console.error(error);
     });
 
-  axios
-    .get(
-      'https://www.strava.com/api/v3/clubs/1042053/activities?page=1&per_page=1',
-      {
-        headers: {
-          Authorization: 'Bearer ' + accessToken,
-        },
-      }
-    )
-    .then((response) => {
-      const data = response.data;
-
-      const athlete =
-        data[0].athlete.firstname + ' ' + data[0].athlete.lastname;
-      const dist = Number((data[0].distance / 1609.34).toFixed(2));
-      const seconds = data[0].moving_time;
-      const activityString =
-        'ATHL:' + athlete + '-DIST:' + dist + '-TIME:' + seconds;
-      cache.set('lastActivityString', activityString);
-
-      if (lastActivityString === activityString) {
-        console.log('Last Activity String: ' + lastActivityString);
-        console.log('No New Activites');
-      } else {
-        let telegramMessage;
-        const activities = data?.map(activity => {
-          const result = {...activity}
-          if (result.sport_type === 'WeightTraining' || result.sport_type === 'Workout') {
-            result.action = 'tập'
-            result.duration = getDuration(activity.moving_time)
-            result.message = ''
-            result.dist = ''
-          } else if (result.sport_type === 'Run') {
-            result.action = 'chạy'
-            result.message = getCommonActivityMessage(activity.moving_time, activity.distance)
-            result.duration = getDuration(activity.moving_time)
-            result.dist = getKilometerDistance(activity.distance)
-          } else if (result.sport_type === 'Ride') {
-            result.message = getRideActivityMessage(activity.moving_time, activity.distance)
-            result.action = 'đạp'
-            result.duration = getDuration(activity.moving_time)
-            result.dist = getKilometerDistance(activity.distance)
-          } else if (result.sport_type === 'Walk') {
-            result.action = 'đi bộ'
-            result.message = getCommonActivityMessage(activity.moving_time, activity.distance)
-            result.duration = getDuration(activity.moving_time)
-            result.dist = getKilometerDistance(activity.distance)
-          } else if (result.sport_type === 'Swim') {
-            result.action = 'bơi'
-            result.message = getSwimActivityMessage(activity.moving_time, activity.distance)
-            result.duration = getDuration(activity.moving_time)
-            result.dist = getKilometerDistance(activity.distance)
-          } else if (result.sport_type === 'Yoga') {
-            result.duration = getDuration(activity.moving_time)
-            result.action = 'tập yoga'
-            result.message = ''
-            result.dist = ''
-          } else {
-            result.duration = getDuration(activity.moving_time)
-            result.action = activity.sport_type
-            result.message = ''
-            result.dist = ''
-          }
-          return result
-        })
-
-        const activityName = activities[0].name;
-        const action = activities[0].action;
-        const duration = activities[0].duration;
-        const distance = activities[0].dist;
-        const message = activities[0].message;
-        const athlete = activities[0].athlete.firstname + ' ' + activities[0].athlete.lastname;
-
-        telegramMessage =
-          activityName +
-          '\n' +
-          athlete +
-          ' ' +
-          action?.toLowerCase() +
-          distance +
-          ' trong ' +
-          duration +
-          '\n' +
-          message;
-
-        try {
-          telegram(
-            process.env.TELEGRAM_GROUP,
-            process.env.TELEGRAM_BOT_TOKEN,
-            telegramMessage,
-            'HTML'
-          );
-        } catch (error) {
-          console.error(
-            `Can not send Telegram message ${telegramMessage}. Error: ${error?.message}`
-          );
+  if (process.env.STRAVA_CLUB_ID) {
+    await axios
+      .get(
+        `https://www.strava.com/api/v3/clubs/${process.env.STRAVA_CLUB_ID}/activities?page=1&per_page=5`,
+        {
+          headers: {
+            Authorization: "Bearer " + accessToken,
+          },
         }
-      }
-    })
-    .catch((error) => {
-      console.error(error);
-    });
-}, 900000);
+      )
+      .then((response) => {
+        const data = response.data;
+        // map message and calculate pace, time
+        const activities = data?.map((activity) => {
+          const result = { ...activity };
+          if (result.sport_type === "WeightTraining") {
+            result.action = "tập weight training";
+            result.duration = getDuration(activity.moving_time);
+            result.message = "";
+            result.dist = "";
+          } else if (result.sport_type === "Workout") {
+            result.action = "tập workout";
+            result.duration = getDuration(activity.moving_time);
+            result.message = "";
+            result.dist = "";
+          } else if (result.sport_type === "Run") {
+            result.action = "chạy";
+            result.message = getCommonActivityMessage(
+              activity.moving_time,
+              activity.distance
+            );
+            result.duration = getDuration(activity.moving_time);
+            result.dist = getKilometerDistance(activity.distance);
+          } else if (result.sport_type === "Ride") {
+            result.message = getRideActivityMessage(
+              activity.moving_time,
+              activity.distance
+            );
+            result.action = "đạp";
+            result.duration = getDuration(activity.moving_time);
+            result.dist = getKilometerDistance(activity.distance);
+          } else if (result.sport_type === "Walk") {
+            result.action = "đi bộ";
+            result.message = getCommonActivityMessage(
+              activity.moving_time,
+              activity.distance
+            );
+            result.duration = getDuration(activity.moving_time);
+            result.dist = getKilometerDistance(activity.distance);
+          } else if (result.sport_type === "Swim") {
+            result.action = "bơi";
+            result.message = getSwimActivityMessage(
+              activity.moving_time,
+              activity.distance
+            );
+            result.duration = getDuration(activity.moving_time);
+            result.dist = getKilometerDistance(activity.distance);
+          } else if (result.sport_type === "Yoga") {
+            result.duration = getDuration(activity.moving_time);
+            result.action = "tập yoga";
+            result.message = "";
+            result.dist = "";
+          } else {
+            result.duration = getDuration(activity.moving_time);
+            result.action = activity.sport_type;
+            result.message = "";
+            result.dist = "";
+          }
+          return result;
+        });
+        for (activity of activities) {
+          const athlete =
+            activity.athlete.firstname + " " + activity.athlete.lastname;
+          const dist = Number((activity.distance / 1000).toFixed(2));
+          const seconds = activity.moving_time;
+          const activityString = getActivityString(athlete, dist, seconds);
+          
+          // find out new one to push messege
+          if (!Array.from(listActivityString).includes(activityString)) {
+            console.log("New activity string: ", activityString);
+            let telegramMessage;
+            const activityName = activity.name;
+            const action = activity.action;
+            const duration = activity.duration;
+            const distance = activity.dist;
+            const message = activity.message;
+            const athlete =
+              activity.athlete.firstname + " " + activity.athlete.lastname;
 
+            telegramMessage =
+              activityName +
+              "\n" +
+              athlete +
+              " " +
+              action?.toLowerCase() +
+              distance +
+              " trong " +
+              duration +
+              "\n" +
+              message;
 
+            // push messege
+            try {
+              telegram(
+                process.env.TELEGRAM_GROUP,
+                process.env.TELEGRAM_BOT_TOKEN,
+                telegramMessage,
+                "HTML"
+              );
+            } catch (error) {
+              console.error(
+                `Can not send Telegram message ${telegramMessage}. Error: ${error?.message}`
+              );
+            }
 
+            hasNew += 1;
+            listActivityString.push(activityString);
+          }
+        }
+        if (!hasNew) {
+          telegramMessage = "There is no new activity, cron job is still running!";
+          try {
+            telegram(
+              process.env.TELEGRAM_TEST_GROUP,
+              process.env.TELEGRAM_BOT_TOKEN,
+              telegramMessage,
+              "HTML"
+            );
+          } catch (error) {
+            console.error(
+              `Can not send Telegram message ${telegramMessage} to test group. Error: ${error?.message}`
+            );
+          }
+        }
+
+        console.log(`New activity counted: ${hasNew}`);
+        cache.set("listActivityString", listActivityString);
+      })
+      .catch((error) => {
+        console.error(error);
+      });
+  } else {
+    console.log("Can not find STRAVA_CLUB_ID");
+  }
+});

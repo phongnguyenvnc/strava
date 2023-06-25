@@ -1,4 +1,5 @@
 require('dotenv').config();
+const axios = require("axios");
 
 const getAccessToken = async () => {
   const headers = {
@@ -13,17 +14,14 @@ const getAccessToken = async () => {
     grant_type: "refresh_token",
   });
 
-  const reauthorizeResponse = await fetch(
-    "https://www.strava.com/api/v3/oauth/token",
-    {
-      method: "POST",
-      headers,
-      body,
-    }
-  );
+  let access = null;
 
-  const result = await reauthorizeResponse.json();
-  const access = result.access_token;
+  const { data } = await axios
+    .post('https://www.strava.com/api/v3/oauth/token', body, {
+    headers
+  })
+
+  access = data.access_token;
 
   return access;
 };
