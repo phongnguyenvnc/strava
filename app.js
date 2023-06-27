@@ -16,11 +16,11 @@ app.listen(PORT, () => {
 });
 
 let dafaultActivitiesString = [
-  "ATHL:Long D.-DIST:32.61-TIME:5285",
-  'ATHL:Tống K.-DIST:5.88-TIME:1953',
-  "ATHL:Quốc N.-DIST:10.01-TIME:4284",
-  "ATHL:Truong B.-DIST:1.46-TIME:1809",
-  "ATHL:Truong B.-DIST:3.02-TIME:1440"
+  "ATHL:Phong N.-DIST:5.07-TIME:2473",
+  'ATHL:Be B.-DIST:5.03-TIME:2402',
+  "ATHL:Cong N.-DIST:4.16-TIME:1483",
+  "ATHL:Kỳ T.-DIST:1.01-TIME:974",
+  "ATHL:Truong B.-DIST:5.03-TIME:2402"
 ];
 // let dafaultActivitiesString = [];
 cache.set("listActivityString", dafaultActivitiesString);
@@ -66,7 +66,7 @@ const getActivityString = (athlete, dist, seconds) => {
   return "ATHL:" + athlete + "-DIST:" + dist + "-TIME:" + seconds;
 };
 
-cron.schedule("0,10,26,30,40,50 * * * *", async () => {
+cron.schedule("0,10,20,30,40,50 * * * *", async () => {
   const listActivityString = cache.get("listActivityString", null) || [];
   console.log("Cached activity strings: ", listActivityString);
 
